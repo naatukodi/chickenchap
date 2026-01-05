@@ -6,79 +6,88 @@ using Microsoft.OpenApi.Models;
 
 var builder = WebApplication.CreateBuilder(args);
 
-// ---------- Services ----------
-builder.Services.ConfigureHttpJsonOptions(o =>
+// ---------- JSON Configuration ----------
+builder.Services.ConfigureHttpJsonOptions(options =>
 {
-    o.SerializerOptions.PropertyNamingPolicy = System.Text.Json.JsonNamingPolicy.CamelCase;
+    options.SerializerOptions.PropertyNamingPolicy =
+        System.Text.Json.JsonNamingPolicy.CamelCase;
 });
 
-builder.Services.Configure<CosmosOptions>(builder.Configuration.GetSection("Cosmos"));
+// ---------- Cosmos DB Configuration ----------
+builder.Services.Configure<CosmosOptions>(
+    builder.Configuration.GetSection("Cosmos"));
+
 builder.Services.AddSingleton<ICosmosClientFactory, CosmosClientFactory>();
 
-// Single Cosmos container reused by all repositories
+// Reuse single Cosmos container
 builder.Services.AddSingleton(sp =>
 {
-    var fac = sp.GetRequiredService<ICosmosClientFactory>();
-    return fac.Container;
+    var factory = sp.GetRequiredService<ICosmosClientFactory>();
+    return factory.Container;
 });
 
-builder.Services.AddScoped<ICosmosRepository<EggCollection>>(sp =>
-    new CosmosRepository<EggCollection>(sp.GetRequiredService<Microsoft.Azure.Cosmos.Container>()));
-builder.Services.AddScoped<ICosmosRepository<Sale>>(sp =>
-    new CosmosRepository<Sale>(sp.GetRequiredService<Microsoft.Azure.Cosmos.Container>()));
-builder.Services.AddScoped<ICosmosRepository<FeedUsage>>(sp =>
-    new CosmosRepository<FeedUsage>(sp.GetRequiredService<Microsoft.Azure.Cosmos.Container>()));
-builder.Services.AddScoped<ICosmosRepository<MedRecord>>(sp =>
-    new CosmosRepository<MedRecord>(sp.GetRequiredService<Microsoft.Azure.Cosmos.Container>()));
-builder.Services.AddScoped<ICosmosRepository<Expense>>(sp =>
-    new CosmosRepository<Expense>(sp.GetRequiredService<Microsoft.Azure.Cosmos.Container>()));
-builder.Services.AddScoped<ICosmosRepository<HatchBatch>>(sp =>
-    new CosmosRepository<HatchBatch>(sp.GetRequiredService<Microsoft.Azure.Cosmos.Container>()));
+// Generic Cosmos repositories
+builder.Services.AddScoped(typeof(ICosmosRepository<>), typeof(CosmosRepository<>));
 
+// ---------- Blob Storage Configuration (STEP 7) ----------
+builder.Services.Configure<BlobStorageOptions>(
+    builder.Configuration.GetSection("BlobStorage"));
+
+builder.Services.AddSingleton<IStorageService, BlobStorageService>();
+
+// ---------- Controllers ----------
 builder.Services.AddControllers();
 
-// Swagger/OpenAPI (register once)
+// ---------- Swagger / OpenAPI ----------
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen(c =>
 {
-    c.SwaggerDoc("v1", new OpenApiInfo { Title = "ChickenChap API", Version = "v1" });
-    // If you generate XML docs, include them here for nicer Swagger:
-    // var xml = $"{Assembly.GetExecutingAssembly().GetName().Name}.xml";
-    // c.IncludeXmlComments(Path.Combine(AppContext.BaseDirectory, xml));
+    c.SwaggerDoc("v1", new OpenApiInfo
+    {
+        Title = "ChickenChap API",
+        Version = "v1"
+    });
+
+    // Optional XML comments
+    // var xmlFile = $"{Assembly.GetExecutingAssembly().GetName().Name}.xml";
+    // var xmlPath = Path.Combine(AppContext.BaseDirectory, xmlFile);
+    // c.IncludeXmlComments(xmlPath);
 });
 
 var app = builder.Build();
 
-// Ensure Cosmos objects exist (Serverless-safe in your factory)
-await app.Services.GetRequiredService<ICosmosClientFactory>().EnsureProvisionedAsync();
+// ---------- Ensure Cosmos DB Exists ----------
+await app.Services
+    .GetRequiredService<ICosmosClientFactory>()
+    .EnsureProvisionedAsync();
 
-// ---------- Middleware (Azure friendly) ----------
-// Forward proto/host so Swagger builds correct URLs behind Azure's proxy
+// ---------- Middleware (Azure Friendly) ----------
 app.UseForwardedHeaders(new ForwardedHeadersOptions
 {
-    ForwardedHeaders = ForwardedHeaders.XForwardedProto | ForwardedHeaders.XForwardedHost
+    ForwardedHeaders =
+        ForwardedHeaders.XForwardedProto |
+        ForwardedHeaders.XForwardedHost
 });
 
-// Support hosting under a virtual path (set in Azure App Settings if needed)
+// ---------- Path Base Support (Optional) ----------
 var pathBase = builder.Configuration["ASPNETCORE_PATHBASE"]; // e.g. "/api"
 if (!string.IsNullOrWhiteSpace(pathBase))
 {
     app.UsePathBase(pathBase);
 }
 
-// Enable Swagger UI in any environment
+// ---------- Swagger ----------
 app.UseSwagger();
-
 app.UseSwaggerUI(c =>
 {
     c.SwaggerEndpoint("/swagger/v1/swagger.json", "ChickenChap API v1");
-    c.RoutePrefix = string.Empty;
+    c.RoutePrefix = string.Empty; // Swagger at root
 });
 
+// ---------- Authorization (future-ready) ----------
+app.UseAuthorization();
 
-// (optional) HTTPS redirection if you want
-// app.UseHttpsRedirection();
-
+// ---------- Routing ----------
 app.MapControllers();
 
 app.Run();

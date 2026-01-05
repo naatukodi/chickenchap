@@ -10,3 +10,8 @@ public sealed class CosmosOptions
     public string PartitionKeyPath { get; set; } = "/pk";
     public string? ProvisioningMode { get; set; } = "Serverless"; // or "Provisioned"
 }
+public sealed class BlobStorageOptions
+{
+    public string ConnectionString { get; set; } = default!;
+    public string ContainerName { get; set; } = "expenses"; // blob container for images
+}
